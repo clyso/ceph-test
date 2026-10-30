@@ -2,6 +2,10 @@ ARG CEPH_VERSION=v19
 FROM quay.io/ceph/ceph:${CEPH_VERSION}
 ARG CEPH_VERSION
 
+LABEL org.opencontainers.image.source="https://github.com/clyso/ceph-test" \
+      org.opencontainers.image.description="Single-node Ceph cluster (mon + mgr + osd + rgw) in one container, for testing" \
+      org.opencontainers.image.vendor="Clyso GmbH"
+
 # Image name the test orchestrator reports for the daemons (orch_data.py).
 ENV CEPH_TEST_ORCHESTRATOR_IMAGE=quay.io/ceph/ceph:${CEPH_VERSION}
 

@@ -41,7 +41,7 @@ declare -A DAEMONS # pid -> daemon name, as in its log file name
 WATCH_PID=
 
 # A daemon's own stdout/stderr (startup noise, mgr module tracebacks) goes to
-# a file next to its log, as when daemons forked into the background.
+# a file next to its log.
 start_daemon() { # <name> <command...>
     local name=$1
     shift
@@ -709,8 +709,7 @@ if is_true "$CEPH_DASHBOARD"; then start_step dashboard step_dashboard; fi
 
 # --- Supervise ---
 # A daemon exiting, or a setup step failing, stops the container. Once every
-# step is done, stream the cluster log as before; ceph -w is restarted if it
-# exits.
+# step is done, stream the cluster log; ceph -w is restarted if it exits.
 while true; do
     pid=
     if wait -n -p pid; then status=0; else status=$?; fi

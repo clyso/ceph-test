@@ -1,0 +1,61 @@
+# Release bot: checks the official Ceph images
+# (https://quay.io/repository/ceph/ceph?tab=tags) for new vX.Y.Z tags. For
+# each major from v19 on, the newest tag that is newer than our last release
+# of that major is built, health-checked and released, each version in its
+# own run so one failing does not block the others. See .github/ceph-versions.py.
+name: Auto-release new Ceph versions
+
+on:
+  schedule:
+    # 13:20 UTC on weekdays: 14:20 CET / 15:20 CEST.
+    - cron: '20 13 * * 1-5'
+  workflow_dispatch:
+
+# One run at a time, so two runs never build and push the same version.
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    # Releases are built from the default branch only, also when started by hand.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      versions: ${{ steps.versions.outputs.versions }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find new Ceph versions
+        id: versions
+        # bash with pipefail: if gh fails, the step fails instead of passing
+        # an empty release list on, which would re-release every major.
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSIONS=$(gh release list --repo "${{ github.repository }}" --limit 1000 \
+            --json tagName --jq '.[].tagName' | python3 .github/ceph-versions.py)
+          echo "New versions: ${VERSIONS}"
+          echo "versions=${VERSIONS}" >> "$GITHUB_OUTPUT"
+
+  # One version at a time, so each release sees the ones before it when it
+  # decides on the moving tags and the Latest mark. A failed version does not
+  # stop the others and is retried on the next scheduled run.
+  release:
+    needs: check
+    if: needs.check.outputs.versions != '[]'
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        version: ${{ fromJSON(needs.check.outputs.versions) }}
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ matrix.version }}

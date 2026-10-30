@@ -3,11 +3,20 @@ name: Build and Publish
 on:
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  # Called by auto-release.yml: builds the version from the current commit
+  # and creates the tag with the release.
+  workflow_call:
+    inputs:
+      version:
+        description: Ceph version to release, e.g. v20.2.4
+        required: true
+        type: string
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
   build:
@@ -22,8 +31,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    outputs:
-      tags: ${{ steps.meta.outputs.tags }}
 
     steps:
       - uses: actions/checkout@v4
@@ -31,23 +38,9 @@ jobs:
       - name: Parse tags
         id: meta
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          MAJOR=$(echo "$TAG" | grep -oE '^v[0-9]+')
-          MINOR=$(echo "$TAG" | grep -oE '^v[0-9]+\.[0-9]+')
           PLATFORM_TAG=$(echo "${{ matrix.platform }}" | tr '/' '-')
-
-          echo "ceph_version=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "platform_image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:build-${TAG}-${PLATFORM_TAG}" >> "$GITHUB_OUTPUT"
-
-          # Full tag list (only used by merge job)
-          TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}"
-          if [ -n "$MINOR" ] && [ "$MINOR" != "$TAG" ]; then
-            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${MINOR}"
-          fi
-          if [ -n "$MAJOR" ] && [ "$MAJOR" != "$TAG" ] && [ "$MAJOR" != "$MINOR" ]; then
-            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${MAJOR}"
-          fi
-          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "ceph_version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "platform_image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:build-${VERSION}-${PLATFORM_TAG}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -69,53 +62,9 @@ jobs:
             CEPH_VERSION=${{ steps.meta.outputs.ceph_version }}
 
       - name: Health check
-        # Backstop: the waits below give up after 5 min each.
+        # Backstop: the script gives up after 5 min.
         timeout-minutes: 15
-        run: |
-          docker run -d --name ceph-health-test \
-            -e CEPH_DEMO_ACCESS_KEY=testkey \
-            -e CEPH_DEMO_SECRET_KEY=testsecret \
-            -e CEPH_RBD_POOL=rbd \
-            ${{ steps.meta.outputs.platform_image }}
-
-          # wait_for <description> <command...>: retry until the command
-          # succeeds or WAIT_SECS pass. Each attempt is capped at 10s, since
-          # ceph/radosgw-admin block forever when the cluster cannot serve them.
-          # The container exiting (the entrypoint fails on a daemon crash or a
-          # stuck setup step) ends the wait at once.
-          WAIT_SECS=300
-          wait_for() {
-            local what=$1 start=$SECONDS
-            shift
-            echo "Waiting for ${what} (up to ${WAIT_SECS}s)..."
-            until timeout 10 "$@" >/dev/null 2>&1; do
-              if [ "$(docker inspect -f '{{.State.Running}}' ceph-health-test)" != true ] \
-                || [ $((SECONDS - start)) -ge "$WAIT_SECS" ]; then
-                echo "FAILED: ${what} not reached"
-                docker logs ceph-health-test
-                exit 1
-              fi
-              sleep 2
-            done
-            echo "${what} ready at +$((SECONDS - start))s"
-          }
-
-          # The image's HEALTHCHECK (mon, mgr, osd), then every enabled
-          # component (RGW, S3 user, RBD pool) as the entrypoint marks them.
-          wait_for "docker health" sh -c \
-            '[ "$(docker inspect -f "{{.State.Health.Status}}" ceph-health-test)" = healthy ]'
-          wait_for "setup complete" docker exec ceph-health-test ceph-test-health all
-
-          # Check the cluster directly too, not only the markers.
-          wait_for "OSD up" sh -c \
-            'docker exec ceph-health-test ceph osd stat | grep -q " 1 up"'
-          wait_for "S3 user" docker exec ceph-health-test \
-            radosgw-admin user info --uid=demo
-          wait_for "RBD pool" sh -c \
-            'docker exec ceph-health-test ceph osd pool application get rbd | grep -q "\"rbd\""'
-          wait_for "RGW HTTP" docker exec ceph-health-test curl -s -o /dev/null http://127.0.0.1:8080
-
-          docker rm -f ceph-health-test
+        run: .github/health-check.sh ${{ steps.meta.outputs.platform_image }}
 
   merge:
     needs: build
@@ -127,17 +76,29 @@ jobs:
     steps:
       - name: Parse tags
         id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          MAJOR=$(echo "$TAG" | grep -oE '^v[0-9]+')
-          MINOR=$(echo "$TAG" | grep -oE '^v[0-9]+\.[0-9]+')
+          TAG="${VERSION}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          RELEASES=$(gh release list --repo "${{ github.repository }}" --limit 1000 \
+            --json tagName --jq '.[].tagName')
 
-          TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${TAG}"
-          if [ -n "$MINOR" ] && [ "$MINOR" != "$TAG" ]; then
-            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${MINOR}"
-          fi
-          if [ -n "$MAJOR" ] && [ "$MAJOR" != "$TAG" ] && [ "$MAJOR" != "$MINOR" ]; then
-            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${MAJOR}"
+          # The moving vX.Y and vX tags only go forward: skip them when a
+          # newer release of that minor/major exists (e.g. an older version
+          # tagged by hand). Only vX.Y.Z versions get them.
+          TAGS="${IMAGE}:${TAG}"
+          if [[ "$TAG" =~ ^(v[0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+            MAJOR=${BASH_REMATCH[1]}
+            MINOR="${MAJOR}.${BASH_REMATCH[2]}"
+            SORTED=$(printf '%s\n%s\n' "$RELEASES" "$TAG" \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -uV)
+            if [ "$(grep "^${MINOR//./\\.}\." <<< "$SORTED" | tail -1)" = "$TAG" ]; then
+              TAGS="${TAGS},${IMAGE}:${MINOR}"
+            fi
+            if [ "$(grep "^${MAJOR}\." <<< "$SORTED" | tail -1)" = "$TAG" ]; then
+              TAGS="${TAGS},${IMAGE}:${MAJOR}"
+            fi
           fi
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
           echo "amd64=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:build-${TAG}-linux-amd64" >> "$GITHUB_OUTPUT"
@@ -156,7 +117,10 @@ jobs:
         run: |
           IFS=',' read -ra TAG_ARRAY <<< "${{ steps.meta.outputs.tags }}"
           for tag in "${TAG_ARRAY[@]}"; do
+            # GHCR shows a multiarch package's description from the index
+            # annotation, not from the image label.
             docker buildx imagetools create -t "$tag" \
+              --annotation "index:org.opencontainers.image.description=Single-node Ceph cluster (mon + mgr + osd + rgw) in one container, for testing" \
               ${{ steps.meta.outputs.amd64 }} \
               ${{ steps.meta.outputs.arm64 }}
           done
@@ -165,14 +129,26 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${VERSION}"
           TAGS="${{ steps.meta.outputs.tags }}"
           BODY="## Images (linux/amd64, linux/arm64)"
           IFS=',' read -ra TAG_ARRAY <<< "$TAGS"
           for tag in "${TAG_ARRAY[@]}"; do
             BODY=$(printf '%s\n```\ndocker pull %s\n```' "$BODY" "$tag")
           done
+
+          # Only the highest version is marked Latest, so a release of an
+          # older major does not take it over.
+          RELEASES=$(gh release list --repo "${{ github.repository }}" --limit 1000 \
+            --json tagName --jq '.[].tagName')
+          NEWEST=$(printf '%s\n%s\n' "$RELEASES" "$TAG" \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          LATEST=false
+          if [ "$NEWEST" = "$TAG" ]; then LATEST=true; fi
+
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --title "$TAG" \
+            --target "$GITHUB_SHA" \
+            --latest="$LATEST" \
             --notes "$BODY"

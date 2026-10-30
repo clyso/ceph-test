@@ -49,7 +49,7 @@ docker compose down -v
 
 ## Image
 
-The stack uses `ghcr.io/arttor/ceph-test:v20`. `docker compose ... --build` builds it locally from the repo root (`../Dockerfile`); without `--build` it is pulled from the registry.
+The stack uses `ghcr.io/clyso/ceph-test:v20`. `docker compose ... --build` builds it locally from the repo root (`../Dockerfile`); without `--build` it is pulled from the registry.
 
 ## Files
 
