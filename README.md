@@ -1,11 +1,17 @@
 # ceph-test
 
+[![release](https://img.shields.io/github/v/release/clyso/ceph-test?sort=semver)](https://github.com/clyso/ceph-test/releases)
+[![pulls](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fgithub.com%2Fclyso%2Fceph-test%2Fpkgs%2Fcontainer%2Fceph-test&search=Total%20downloads%3C%2Fspan%3E%5Cs%2A%3Ch3%20title%3D%22%5Cd%2B%22%3E%28%5B%5E%3C%5D%2B%29%3C%2Fh3%3E%5B%5Cs%5CS%5D%2A&replace=%241&label=pulls)](https://github.com/clyso/ceph-test/pkgs/container/ceph-test)
+[![auto release](https://img.shields.io/github/actions/workflow/status/clyso/ceph-test/auto-release.yml?label=auto%20release)](https://github.com/clyso/ceph-test/actions/workflows/auto-release.yml)
+[![platforms](https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-blue)](https://github.com/clyso/ceph-test/pkgs/container/ceph-test)
+[![license](https://img.shields.io/github/license/clyso/ceph-test)](LICENSE)
+
 Single-node Ceph cluster (mon + mgr + osd + rgw) in one container, for testing. Based on `quay.io/ceph/ceph`. Multiarch: `linux/amd64` and `linux/arm64`.
 
 ## Usage
 
 ```bash
-docker run -d --name ceph -p 8080:8080 ghcr.io/arttor/ceph-test:v20
+docker run -d --name ceph -p 8080:8080 ghcr.io/clyso/ceph-test:v20
 ```
 
 With an S3 user:
@@ -15,7 +21,7 @@ docker run -d --name ceph \
   -e CEPH_DEMO_ACCESS_KEY=mykey \
   -e CEPH_DEMO_SECRET_KEY=mysecret \
   -p 8080:8080 \
-  ghcr.io/arttor/ceph-test:v20
+  ghcr.io/clyso/ceph-test:v20
 ```
 
 Check status: `docker exec ceph ceph -s`
@@ -28,7 +34,7 @@ With the dashboard:
 docker run -d --name ceph \
   -e CEPH_DASHBOARD=true \
   -p 8080:8080 -p 8443:8443 \
-  ghcr.io/arttor/ceph-test:v20
+  ghcr.io/clyso/ceph-test:v20
 ```
 
 Then open http://localhost:8443 and log in with `admin` / `admin`.
@@ -84,7 +90,7 @@ With compose, override the healthcheck to wait for what your tests need:
 ```yaml
 services:
   ceph:
-    image: ghcr.io/arttor/ceph-test:v20
+    image: ghcr.io/clyso/ceph-test:v20
     environment:
       CEPH_CEPHFS: "true"
     healthcheck:
@@ -110,7 +116,7 @@ docker run -d --name ceph \
   -e CEPH_TEST_ORCHESTRATOR=true \
   -e CEPH_TEST_ORCHESTRATOR_DATA=/etc/ceph-orch/data.json \
   -v $(pwd)/orch-data.json:/etc/ceph-orch/data.json:ro \
-  ghcr.io/arttor/ceph-test:v20
+  ghcr.io/clyso/ceph-test:v20
 ```
 
 The format is the one `ceph test_orchestrator load_data` accepts: `inventory` (hosts and devices), `services` and `daemons` lists. See the upstream [`dummy_data.json`](https://github.com/ceph/ceph/blob/main/src/pybind/mgr/test_orchestrator/dummy_data.json) for a full example.
@@ -147,7 +153,7 @@ The format is the one `ceph test_orchestrator load_data` accepts: `inventory` (h
 By default nothing persists between containers — each start creates a fresh cluster. To keep data across restarts, mount a volume at `/var/lib/ceph`; if it already contains a cluster the container reuses it instead of running `mkfs`.
 
 ```bash
-docker run -d --name ceph -v ceph-data:/var/lib/ceph -p 8080:8080 ghcr.io/arttor/ceph-test:v20
+docker run -d --name ceph -v ceph-data:/var/lib/ceph -p 8080:8080 ghcr.io/clyso/ceph-test:v20
 ```
 
 > Use a **named volume** (as above), not a bind mount to a host path. On macOS, BlueStore `mkfs` fails on a Docker Desktop file share, so a bind mount for `/var/lib/ceph` does not work; named volumes live in the Docker VM and work fine.
@@ -165,7 +171,7 @@ docker run -d --name ceph \
 rgw keystone api version = 3
 rgw keystone url = http://keystone:5000
 rgw s3 auth use keystone = true' \
-  ghcr.io/arttor/ceph-test:v20
+  ghcr.io/clyso/ceph-test:v20
 ```
 
 or a mounted config file:
@@ -177,14 +183,14 @@ rgw keystone url = http://keystone:5000' > keystone.conf
 
 docker run -d --name ceph \
   -v $(pwd)/keystone.conf:/etc/ceph/ceph.conf.d/keystone.conf:ro \
-  ghcr.io/arttor/ceph-test:v20
+  ghcr.io/clyso/ceph-test:v20
 ```
 
 With testcontainers (Go), inject via the `Files` field:
 
 ```go
 req := testcontainers.ContainerRequest{
-    Image: "ghcr.io/arttor/ceph-test:v20",
+    Image: "ghcr.io/clyso/ceph-test:v20",
     Files: []testcontainers.ContainerFile{{
         Reader:            strings.NewReader(keystoneConf),
         ContainerFilePath: "/etc/ceph/ceph.conf.d/keystone.conf",
@@ -198,7 +204,7 @@ req := testcontainers.ContainerRequest{
 The OSD is a sparse 2 GiB file by default: space is allocated only as data is written. Set `bluestore_block_size` to change it:
 
 ```bash
-docker run -d --name ceph -e 'CEPH_EXTRA_CONF=bluestore_block_size = 10G' ghcr.io/arttor/ceph-test:v20
+docker run -d --name ceph -e 'CEPH_EXTRA_CONF=bluestore_block_size = 10G' ghcr.io/clyso/ceph-test:v20
 ```
 
 Settings read at mkfs, such as `bluestore_block_size`, apply only on the first start. A cluster persisted in a `/var/lib/ceph` volume keeps its OSD size and logs a warning if the setting differs.
@@ -214,3 +220,15 @@ With a specific Ceph version:
 ```bash
 docker build --build-arg CEPH_VERSION=v20.2.2 -t ceph-test:v20 .
 ```
+
+## Releases
+
+Images are published to `ghcr.io/clyso/ceph-test` as `vX.Y.Z`, `vX.Y` and `vX`, matching the `quay.io/ceph/ceph` version they are built on. A workflow runs every weekday afternoon (CET) and releases new Ceph versions: for every major from v19 on (new majors included), the newest `vX.Y.Z` on quay that is newer than the last release of that major is built, health-checked and released. Pushing a `vX.Y.Z` tag releases a version by hand.
+
+## License
+
+The code in this repository is licensed under the [MIT License](LICENSE).
+
+The image is built on `quay.io/ceph/ceph` and also contains Ceph and other software from the base image, each under its own license (Ceph is mostly LGPL-2.1/LGPL-3.0; see [COPYING](https://github.com/ceph/ceph/blob/main/COPYING)). The build patches Ceph's `test_orchestrator` mgr module, see [`patch_test_orchestrator.py`](patch_test_orchestrator.py). As with any container image, it is the user's responsibility to make sure their use of the image complies with the licenses of all software it contains.
+
+Ceph is a trademark of the Linux Foundation. This project is not affiliated with or endorsed by the Ceph project.

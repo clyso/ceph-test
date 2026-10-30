@@ -4,6 +4,8 @@ These people have write access to `main` and are responsible for reviewing and m
 
 ## Core Maintainers
 - Artem (@arttor) - project lead
+- @aiivashchenko
+- Christian Schupfner (@schucly)
 - Joao Eduardo Luis (@jecluis)
 - Kyr (@kshtsk)
 

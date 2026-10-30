@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        ceph_version: [ v19, v20, v21 ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ceph-test:ci
+          build-args: |
+            CEPH_VERSION=${{ matrix.ceph_version }}
+
+      - name: Health check
+        # Backstop: the script gives up after 5 min.
+        timeout-minutes: 15
+        run: .github/health-check.sh ceph-test:ci

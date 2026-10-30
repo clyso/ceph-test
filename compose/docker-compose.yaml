@@ -9,7 +9,7 @@ services:
       context: ..
       args:
         CEPH_VERSION: v20.2.2
-    image: ghcr.io/arttor/ceph-test:v20
+    image: ghcr.io/clyso/ceph-test:v20
     environment:
       CEPH_DASHBOARD: "true"
       CEPH_PROMETHEUS: "true"
@@ -37,7 +37,7 @@ services:
   # the multi-cluster view (which keys clusters by fsid) treats it as distinct.
   ceph2:
     profiles: ["multicluster"]
-    image: ghcr.io/arttor/ceph-test:v20
+    image: ghcr.io/clyso/ceph-test:v20
     environment:
       CEPH_DASHBOARD: "true"
       CEPH_PROMETHEUS: "true"
@@ -70,7 +70,7 @@ services:
   # One-shot: copy the Ceph Grafana dashboards and Prometheus alert rules
   # shipped inside the ceph image into volumes that Grafana and Prometheus use.
   ceph-assets:
-    image: ghcr.io/arttor/ceph-test:v20
+    image: ghcr.io/clyso/ceph-test:v20
     entrypoint: ["sh", "-c"]
     command:
       - |
@@ -86,7 +86,6 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
       GF_SECURITY_ALLOW_EMBEDDING: "true"
-      # Quieter logs (default is chatty "info").
       GF_LOG_LEVEL: "warn"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
